@@ -1,0 +1,751 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>台股「整張 vs 零股」價差 & 掛賣監控</title>
+  <style>
+    :root {
+      /* 護眼明亮配色：柔和豆沙米白底 + 深炭灰字 + 沉穩青綠主色 */
+      --bg: #f3f7f2;
+      --card: #fcfdfb;
+      --card-sub: #f6faf5;
+      --hover: #edf5ec;
+      --border: #d7e2d5;
+      --text: #1f2d24;
+      --muted: #5c6f63;
+      --accent: #0f766e;
+      --accent-hover: #115e59;
+      --accent-soft: #e6f4f1;
+      --up: #c81e1e;      /* 零股溢價(+)：沉穩紅 */
+      --down: #15803d;    /* 零股折價(-)：護眼綠 */
+      --warn-bg: #fef7e0;
+      --warn-border: #e5a00d;
+      --shadow: 0 2px 10px rgba(31, 45, 36, 0.05);
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: "Microsoft JhengHei", "PingFang TC", "Noto Sans TC", system-ui, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.55;
+      font-size: 15px;
+    }
+    .container {
+      max-width: 1080px;
+      margin: 0 auto;
+      padding: 22px 18px 56px;
+    }
+    header {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      margin-bottom: 18px;
+      padding: 14px 18px;
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      box-shadow: var(--shadow);
+    }
+    h1 {
+      margin: 0;
+      font-size: 1.3rem;
+      color: var(--text);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .status-bar {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 10px;
+      font-size: 0.88rem;
+      color: var(--muted);
+    }
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      padding: 4px 11px;
+      border-radius: 999px;
+      font-size: 0.82rem;
+      font-weight: 700;
+      background: var(--card-sub);
+      border: 1px solid var(--border);
+      color: var(--text);
+    }
+    .badge.intraday { background: #dcfce7; border-color: #86efac; color: #166534; }
+    .badge.after { background: #e0f2fe; border-color: #7dd3fc; color: #075985; }
+    .badge.error { background: #fee2e2; border-color: #fca5a5; color: #991b1b; }
+
+    .notice {
+      background: #eef6ff;
+      border: 1px solid #bfdbfe;
+      color: #1e40af;
+      padding: 9px 14px;
+      border-radius: 10px;
+      font-size: 0.88rem;
+      margin-bottom: 16px;
+      display: none;
+    }
+    .panel {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 18px;
+      margin-bottom: 18px;
+      box-shadow: var(--shadow);
+    }
+    .panel-header {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      margin-bottom: 14px;
+    }
+    .panel-title {
+      font-size: 1.06rem;
+      font-weight: 700;
+      color: var(--text);
+    }
+    .controls {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 8px;
+    }
+    input[type="text"], input[type="number"], select {
+      background: #ffffff;
+      border: 1px solid #c5d4c3;
+      color: var(--text);
+      padding: 8px 12px;
+      border-radius: 9px;
+      font-size: 0.92rem;
+      outline: none;
+    }
+    input:focus, select:focus {
+      border-color: var(--accent);
+      box-shadow: 0 0 0 3px rgba(15, 118, 110, 0.12);
+    }
+    button {
+      background: var(--accent);
+      color: #ffffff;
+      border: none;
+      padding: 8px 15px;
+      border-radius: 9px;
+      font-size: 0.9rem;
+      font-weight: 600;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      transition: background 0.15s;
+    }
+    button:hover { background: var(--accent-hover); }
+    button:disabled { opacity: 0.55; cursor: not-allowed; }
+    button.secondary {
+      background: var(--accent-soft);
+      color: var(--accent);
+      border: 1px solid #b8dfd7;
+    }
+    button.secondary:hover { background: #d5ece7; }
+    button.tiny {
+      background: var(--card-sub);
+      color: var(--accent);
+      border: 1px solid #c5d9d4;
+      padding: 4px 10px;
+      font-size: 0.82rem;
+      border-radius: 7px;
+      margin-right: 4px;
+    }
+    button.tiny:hover { background: var(--accent-soft); }
+    button.tiny.active { background: var(--accent); color: #fff; border-color: var(--accent); }
+    button.danger {
+      background: transparent;
+      color: var(--muted);
+      padding: 4px 8px;
+      font-size: 0.84rem;
+    }
+    button.danger:hover { color: var(--up); background: #fee2e2; }
+
+    /* Single stock card */
+    .single-result {
+      margin-top: 12px;
+      display: none;
+      background: var(--card-sub);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 16px;
+    }
+    .single-result.alert {
+      border-color: var(--warn-border);
+      background: var(--warn-bg);
+    }
+    .single-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+      gap: 14px;
+      align-items: center;
+    }
+    .metric-label { font-size: 0.8rem; color: var(--muted); }
+    .metric-val { font-size: 1.28rem; font-weight: 700; color: var(--text); }
+    .metric-sub { font-size: 0.8rem; color: var(--muted); margin-top: 2px; }
+
+    /* Ask-only ladder */
+    .ask-box {
+      margin-top: 14px;
+      padding-top: 12px;
+      border-top: 1px dashed var(--border);
+    }
+    .ask-box-head {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 8px;
+      font-size: 0.88rem;
+      font-weight: 700;
+      color: var(--accent);
+    }
+    .ask-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(165px, 1fr));
+      gap: 8px;
+    }
+    .ask-pill {
+      background: #ffffff;
+      border: 1px solid var(--border);
+      border-radius: 9px;
+      padding: 8px 11px;
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+    }
+    .ask-pill-lv { font-size: 0.75rem; color: var(--muted); }
+    .ask-pill-price { font-size: 1.08rem; font-weight: 700; color: var(--down); }
+    .ask-pill-vol { font-size: 0.84rem; color: var(--text); font-weight: 600; }
+    .ask-pill-lots { font-size: 0.78rem; color: var(--muted); font-weight: 400; }
+
+    /* Watchlist chips */
+    .chip-list {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 7px;
+      margin-bottom: 14px;
+    }
+    .chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      background: var(--card-sub);
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      padding: 4px 11px;
+      font-size: 0.85rem;
+    }
+    .chip button {
+      background: transparent;
+      color: var(--muted);
+      padding: 0 2px;
+      font-size: 0.85rem;
+    }
+    .chip button:hover { color: var(--up); background: transparent; }
+
+    /* Table */
+    .table-wrap { overflow-x: auto; }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.94rem;
+    }
+    th, td {
+      padding: 12px 10px;
+      text-align: right;
+      border-bottom: 1px solid var(--border);
+      white-space: nowrap;
+    }
+    th {
+      color: var(--muted);
+      font-weight: 700;
+      font-size: 0.83rem;
+      background: var(--card-sub);
+    }
+    th:first-child, td:first-child { text-align: left; }
+    tbody tr:hover { background: var(--hover); }
+    tbody tr.alert-row { background: var(--warn-bg); }
+    tbody tr.alert-row:hover { background: #fdf0c8; }
+
+    .pos { color: var(--up); font-weight: 700; }
+    .neg { color: var(--down); font-weight: 700; }
+    .flat { color: var(--muted); }
+    .stock-code { font-weight: 700; color: var(--accent); margin-right: 6px; }
+    .mkt-tag {
+      font-size: 0.72rem;
+      padding: 2px 6px;
+      border-radius: 5px;
+      background: #e6efe5;
+      color: #3f5848;
+      margin-left: 5px;
+    }
+    .alert-pill {
+      display: inline-block;
+      margin-left: 6px;
+      font-size: 0.72rem;
+      padding: 2px 7px;
+      border-radius: 999px;
+      background: #f59e0b;
+      color: #ffffff;
+      font-weight: 700;
+    }
+    .ask-inline-price { color: var(--down); font-weight: 700; }
+    .ask-inline-qty { display: block; font-size: 0.8rem; color: var(--muted); }
+    .book-row td {
+      background: var(--card-sub) !important;
+      padding: 12px 16px !important;
+      text-align: left !important;
+    }
+    .footer-note {
+      font-size: 0.82rem;
+      color: var(--muted);
+      margin-top: 10px;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <header>
+      <h1>🌿 台股「整張 vs 零股」價差 & 掛賣監控</h1>
+      <div class="status-bar">
+        <span id="modeBadge" class="badge">準備中...</span>
+        <span>最後刷新：<strong id="lastTime">--:--:--</strong></span>
+        <select id="modeSelect" title="資料來源">
+          <option value="auto">自動（盤中即時優先）</option>
+          <option value="intraday">強制盤中即時</option>
+          <option value="after">盤後官方資料</option>
+        </select>
+      </div>
+    </header>
+
+    <div id="noticeBox" class="notice"></div>
+
+    <!-- 單股快查 -->
+    <section class="panel">
+      <div class="panel-header">
+        <div class="panel-title">🔍 單股即時查詢</div>
+        <div class="controls">
+          <input type="text" id="singleInput" placeholder="輸入股票代號（如 2330、6614）" style="width: 230px;" />
+          <button id="singleQueryBtn" onclick="flashSingle()">⚡ 查詢 / 刷新單股</button>
+        </div>
+      </div>
+      <div id="singleResult" class="single-result"></div>
+    </section>
+
+    <!-- 常駐自選股 -->
+    <section class="panel">
+      <div class="panel-header">
+        <div class="panel-title">📌 常駐監控清單</div>
+        <div class="controls">
+          <input type="text" id="addWatchInput" placeholder="新增代號（空白分隔可加多檔）" style="width: 215px;" />
+          <button class="secondary" onclick="addWatchFromInput()">＋ 加入常駐</button>
+          <label style="font-size:0.86rem; color:var(--muted); display:inline-flex; align-items:center; gap:4px;">
+            警示
+            <input type="number" id="thresholdInput" value="5" min="0" step="0.5" style="width:66px;" />%
+          </label>
+          <select id="autoRefreshSelect" onchange="updateAutoRefresh()">
+            <option value="0">手動刷新</option>
+            <option value="10">每 10 秒</option>
+            <option value="30">每 30 秒</option>
+            <option value="60">每 60 秒</option>
+          </select>
+          <button id="refreshWatchBtn" onclick="flashWatchlist()">🔄 刷新常駐股</button>
+        </div>
+      </div>
+
+      <div id="chipList" class="chip-list"></div>
+
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>股票</th>
+              <th>整張現價</th>
+              <th>零股現價</th>
+              <th>價差 (%) ↓</th>
+              <th>零股掛賣（賣一價 / 張數）</th>
+              <th>五檔掛賣合計</th>
+              <th>操作</th>
+            </tr>
+          </thead>
+          <tbody id="watchTableBody">
+            <tr><td colspan="7" style="text-align:center; color:var(--muted); padding:26px;">載入中...</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="footer-note">
+        💡 1 張 = 1,000 股。價差(%) = (零股價 − 整張價) ÷ 整張價 × 100%。按 <strong>F5</strong> 或點「刷新常駐股」立即更新。
+      </div>
+    </section>
+  </div>
+
+  <script>
+    const STORAGE_KEY = "tw_odd_spread_watchlist_v1";
+    const THRESHOLD_KEY = "tw_odd_spread_threshold_v1";
+    const DEFAULT_WATCHLIST = ["2330", "0050", "6614", "3064", "4943"];
+
+    let watchlist = loadWatchlist();
+    let autoTimer = null;
+    let lastSingleCode = "";
+    let expandedCodes = new Set();
+
+    function loadWatchlist() {
+      try {
+        const raw = localStorage.getItem(STORAGE_KEY);
+        if (raw) {
+          const arr = JSON.parse(raw);
+          if (Array.isArray(arr) && arr.length > 0) return arr;
+        }
+      } catch (e) {}
+      return [...DEFAULT_WATCHLIST];
+    }
+
+    function saveWatchlist() {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(watchlist));
+      renderChips();
+    }
+
+    function getThreshold() {
+      const v = parseFloat(document.getElementById("thresholdInput").value);
+      return isNaN(v) ? 5 : v;
+    }
+
+    function fmtNum(v, digits = 2) {
+      if (v === null || v === undefined || v === "") return "--";
+      const n = Number(v);
+      return isNaN(n) ? String(v) : n.toFixed(digits);
+    }
+
+    function fmtInt(v) {
+      if (v === null || v === undefined || v === "") return "--";
+      const n = Number(v);
+      return isNaN(n) ? String(v) : n.toLocaleString("en-US");
+    }
+
+    function fmtLots(shares) {
+      if (shares === null || shares === undefined || shares <= 0) return "0 張";
+      const lots = shares / 1000;
+      return lots >= 1 ? `${lots.toFixed(2)} 張` : `${lots.toFixed(3)} 張`;
+    }
+
+    function fmtSpreadClass(pct) {
+      if (pct === null || pct === undefined) return "flat";
+      if (pct > 0) return "pos";
+      if (pct < 0) return "neg";
+      return "flat";
+    }
+
+    function fmtSigned(v, digits = 2, suffix = "") {
+      if (v === null || v === undefined) return "--";
+      const sign = v > 0 ? "+" : "";
+      return `${sign}${Number(v).toFixed(digits)}${suffix}`;
+    }
+
+    function renderAskLadder(asks) {
+      if (!asks || asks.length === 0) {
+        return `<div class="ask-box">
+          <div class="ask-box-head"><span>零股掛賣明細（賣一～賣五）</span><span style="color:var(--muted);font-weight:400;">目前無掛賣揭示</span></div>
+        </div>`;
+      }
+      const totalShares = asks.reduce((s, x) => s + (x.vol || 0), 0);
+      const cards = asks.map((lv, idx) => `
+        <div class="ask-pill">
+          <span class="ask-pill-lv">掛賣第 ${idx + 1} 檔</span>
+          <span class="ask-pill-price">${fmtNum(lv.price)} 元</span>
+          <span class="ask-pill-vol">${fmtLots(lv.vol)} <span class="ask-pill-lots">(${fmtInt(lv.vol)} 股)</span></span>
+        </div>
+      `).join("");
+      return `<div class="ask-box">
+        <div class="ask-box-head">
+          <span>📋 零股掛賣明細（賣一～賣${asks.length}）</span>
+          <span>合計掛賣：${fmtLots(totalShares)}（${fmtInt(totalShares)} 股）</span>
+        </div>
+        <div class="ask-grid">${cards}</div>
+      </div>`;
+    }
+
+    function updateStatus(data) {
+      const badge = document.getElementById("modeBadge");
+      const notice = document.getElementById("noticeBox");
+      document.getElementById("lastTime").textContent = data.timestamp || new Date().toLocaleTimeString();
+
+      badge.className = "badge";
+      if (data.mode === "intraday") {
+        badge.classList.add("intraday");
+        badge.textContent = "🟢 " + (data.mode_label || "盤中即時");
+      } else if (data.mode === "after") {
+        badge.classList.add("after");
+        badge.textContent = "☀️ " + (data.mode_label || "盤後資料");
+      } else if (data.mode === "error") {
+        badge.classList.add("error");
+        badge.textContent = "⚠️ " + (data.mode_label || "連線失敗");
+      } else {
+        badge.textContent = "就緒";
+      }
+
+      if (data.error) {
+        notice.style.display = "block";
+        notice.textContent = "⚠️ " + data.error;
+      } else if (data.notice) {
+        notice.style.display = "block";
+        notice.textContent = "ℹ️ " + data.notice;
+      } else {
+        notice.style.display = "none";
+      }
+    }
+
+    async function fetchQuotes(codes) {
+      const mode = document.getElementById("modeSelect").value;
+      const url = `/api/quote?codes=${encodeURIComponent(codes.join(","))}&mode=${encodeURIComponent(mode)}&_t=${Date.now()}`;
+      const resp = await fetch(url);
+      if (!resp.ok) throw new Error("HTTP " + resp.status);
+      return await resp.json();
+    }
+
+    function renderChips() {
+      const box = document.getElementById("chipList");
+      if (watchlist.length === 0) {
+        box.innerHTML = `<span style="color:var(--muted); font-size:0.86rem;">尚未加入常駐股。</span>`;
+        return;
+      }
+      box.innerHTML = watchlist.map(c => `
+        <span class="chip">
+          <span style="cursor:pointer; color:var(--accent); font-weight:700;" onclick="quickSingle('${c}')" title="單獨查詢 ${c}">${c}</span>
+          <button onclick="removeWatch('${c}')" title="移除 ${c}">✕</button>
+        </span>
+      `).join("");
+    }
+
+    function addCodesToWatchlist(rawStr) {
+      const parts = rawStr.toUpperCase().split(/[\s,，、]+/).map(s => s.trim()).filter(Boolean);
+      let added = false;
+      for (const p of parts) {
+        if (!watchlist.includes(p)) {
+          watchlist.push(p);
+          added = true;
+        }
+      }
+      if (added) {
+        saveWatchlist();
+        flashWatchlist();
+      }
+    }
+
+    function addWatchFromInput() {
+      const inp = document.getElementById("addWatchInput");
+      if (!inp.value.trim()) return;
+      addCodesToWatchlist(inp.value);
+      inp.value = "";
+    }
+
+    function removeWatch(code) {
+      watchlist = watchlist.filter(c => c !== code);
+      expandedCodes.delete(code);
+      saveWatchlist();
+      flashWatchlist();
+    }
+
+    function quickSingle(code) {
+      document.getElementById("singleInput").value = code;
+      flashSingle();
+    }
+
+    function toggleBook(code) {
+      if (expandedCodes.has(code)) expandedCodes.delete(code);
+      else expandedCodes.add(code);
+      const row = document.getElementById("book-row-" + code);
+      const btn = document.getElementById("book-btn-" + code);
+      if (row) row.style.display = expandedCodes.has(code) ? "table-row" : "none";
+      if (btn) btn.classList.toggle("active", expandedCodes.has(code));
+    }
+
+    async function flashSingle() {
+      const inp = document.getElementById("singleInput");
+      const code = (inp.value.trim() || lastSingleCode).toUpperCase();
+      if (!code) return;
+      lastSingleCode = code;
+      inp.value = code;
+
+      const btn = document.getElementById("singleQueryBtn");
+      const box = document.getElementById("singleResult");
+      btn.disabled = true;
+      btn.textContent = "查詢中...";
+      try {
+        const data = await fetchQuotes([code]);
+        updateStatus(data);
+        const item = (data.items || [])[0];
+        box.style.display = "block";
+        if (!item || !item.found) {
+          box.className = "single-result";
+          box.innerHTML = `<div style="color:var(--up);">查無代號 <strong>${code}</strong>（${item?.error || "請確認代號"}）</div>`;
+          return;
+        }
+        const th = getThreshold();
+        const isAlert = item.diff_pct !== null && Math.abs(item.diff_pct) >= th;
+        box.className = "single-result" + (isAlert ? " alert" : "");
+        const inWatch = watchlist.includes(item.code);
+        box.innerHTML = `
+          <div class="single-grid">
+            <div>
+              <div class="metric-label">股票</div>
+              <div class="metric-val"><span class="stock-code">${item.code}</span>${item.name}<span class="mkt-tag">${item.market}</span></div>
+              <div class="metric-sub">${item.date || ""}｜時間 ${item.odd_time || item.reg_time || "-"}</div>
+            </div>
+            <div>
+              <div class="metric-label">整張現價（${item.reg_price_type}）</div>
+              <div class="metric-val">${fmtNum(item.reg_price)}</div>
+            </div>
+            <div>
+              <div class="metric-label">零股現價（${item.odd_price_type}）</div>
+              <div class="metric-val">${fmtNum(item.odd_price)}</div>
+            </div>
+            <div>
+              <div class="metric-label">整零價差</div>
+              <div class="metric-val ${fmtSpreadClass(item.diff_pct)}">
+                ${fmtSigned(item.diff_pct, 2, "%")}
+                ${isAlert ? `<span class="alert-pill">≥${th}%</span>` : ""}
+              </div>
+              <div class="metric-sub">${fmtSigned(item.diff, 2, " 元")}</div>
+            </div>
+            <div style="text-align:right;">
+              ${inWatch
+                ? `<span style="color:var(--muted); font-size:0.86rem;">✓ 已在常駐</span>`
+                : `<button class="secondary" onclick="addCodesToWatchlist('${item.code}'); flashSingle();">＋ 加入常駐</button>`
+              }
+            </div>
+          </div>
+          ${renderAskLadder(item.odd_asks)}
+        `;
+      } catch (e) {
+        box.style.display = "block";
+        box.className = "single-result";
+        box.innerHTML = `<div style="color:var(--up);">查詢失敗：${e.message}</div>`;
+      } finally {
+        btn.disabled = false;
+        btn.textContent = "⚡ 查詢 / 刷新單股";
+      }
+    }
+
+    async function flashWatchlist() {
+      const tbody = document.getElementById("watchTableBody");
+      const btn = document.getElementById("refreshWatchBtn");
+      if (watchlist.length === 0) {
+        tbody.innerHTML = `<tr><td colspan="7" style="text-align:center; color:var(--muted); padding:26px;">常駐清單是空的，請先加入股票代號。</td></tr>`;
+        return;
+      }
+      btn.disabled = true;
+      btn.textContent = "刷新中...";
+      try {
+        const data = await fetchQuotes(watchlist);
+        updateStatus(data);
+        const th = getThreshold();
+        const items = [...(data.items || [])];
+        items.sort((a, b) => {
+          const av = a.diff_pct === null || a.diff_pct === undefined ? -1 : Math.abs(a.diff_pct);
+          const bv = b.diff_pct === null || b.diff_pct === undefined ? -1 : Math.abs(b.diff_pct);
+          return bv - av;
+        });
+
+        tbody.innerHTML = items.map(item => {
+          if (!item.found) {
+            return `<tr>
+              <td><span class="stock-code">${item.code}</span><span style="color:var(--up);">查無資料</span></td>
+              <td colspan="5" style="text-align:center; color:var(--muted);">${item.error || ""}</td>
+              <td><button class="danger" onclick="removeWatch('${item.code}')">移除</button></td>
+            </tr>`;
+          }
+          const isAlert = item.diff_pct !== null && Math.abs(item.diff_pct) >= th;
+          const cls = fmtSpreadClass(item.diff_pct);
+          const asks = item.odd_asks || [];
+          const ask1 = asks[0];
+          const totalAskShares = asks.reduce((s, x) => s + (x.vol || 0), 0);
+
+          const ask1Html = ask1
+            ? `<span class="ask-inline-price">${fmtNum(ask1.price)} 元</span>
+               <span class="ask-inline-qty">${fmtLots(ask1.vol)}（${fmtInt(ask1.vol)} 股）</span>`
+            : `<span style="color:var(--muted);">無掛賣</span>`;
+
+          const totalAskHtml = asks.length > 0
+            ? `<strong>${fmtLots(totalAskShares)}</strong><span class="ask-inline-qty">${fmtInt(totalAskShares)} 股</span>`
+            : `<span style="color:var(--muted);">--</span>`;
+
+          return `<tr class="${isAlert ? "alert-row" : ""}">
+            <td>
+              <span class="stock-code">${item.code}</span>${item.name}
+              <span class="mkt-tag">${item.market}</span>
+              ${isAlert ? `<span class="alert-pill">≥${th}%</span>` : ""}
+            </td>
+            <td><strong>${fmtNum(item.reg_price)}</strong></td>
+            <td><strong>${fmtNum(item.odd_price)}</strong></td>
+            <td class="${cls}" style="font-size:1.05rem;">
+              ${fmtSigned(item.diff_pct, 2, "%")}
+              <span class="ask-inline-qty">${fmtSigned(item.diff, 2, " 元")}</span>
+            </td>
+            <td>${ask1Html}</td>
+            <td>${totalAskHtml}</td>
+            <td>
+              <button id="book-btn-${item.code}" class="tiny ${expandedCodes.has(item.code) ? "active" : ""}" onclick="toggleBook('${item.code}')">掛賣五檔</button>
+              <button class="danger" onclick="removeWatch('${item.code}')">移除</button>
+            </td>
+          </tr>
+          <tr id="book-row-${item.code}" class="book-row" style="display:${expandedCodes.has(item.code) ? "table-row" : "none"};">
+            <td colspan="7">${renderAskLadder(asks)}</td>
+          </tr>`;
+        }).join("");
+      } catch (e) {
+        tbody.innerHTML = `<tr><td colspan="7" style="text-align:center; color:var(--up); padding:26px;">刷新失敗：${e.message}</td></tr>`;
+      } finally {
+        btn.disabled = false;
+        btn.textContent = "🔄 刷新常駐股";
+      }
+    }
+
+    function updateAutoRefresh() {
+      if (autoTimer) {
+        clearInterval(autoTimer);
+        autoTimer = null;
+      }
+      const sec = parseInt(document.getElementById("autoRefreshSelect").value, 10);
+      if (sec > 0) {
+        autoTimer = setInterval(flashWatchlist, sec * 1000);
+      }
+    }
+
+    (function init() {
+      const savedTh = localStorage.getItem(THRESHOLD_KEY);
+      if (savedTh !== null) document.getElementById("thresholdInput").value = savedTh;
+
+      document.getElementById("thresholdInput").addEventListener("change", () => {
+        localStorage.setItem(THRESHOLD_KEY, document.getElementById("thresholdInput").value);
+        flashWatchlist();
+      });
+      document.getElementById("singleInput").addEventListener("keydown", (e) => {
+        if (e.key === "Enter") flashSingle();
+      });
+      document.getElementById("addWatchInput").addEventListener("keydown", (e) => {
+        if (e.key === "Enter") addWatchFromInput();
+      });
+      document.getElementById("modeSelect").addEventListener("change", () => {
+        flashWatchlist();
+        if (lastSingleCode) flashSingle();
+      });
+
+      renderChips();
+      flashWatchlist();
+    })();
+  </script>
+</body>
+</html>
