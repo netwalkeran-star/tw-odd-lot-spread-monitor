@@ -39,7 +39,13 @@ tw-odd-lot-spread-monitor/
 - **Python 3.8+**（Windows / macOS / Linux 皆可，不需額外安裝任何套件）
 - 現代瀏覽器（Chrome / Edge / Safari / Firefox）
 
-### Windows 一鍵啟動
+### ☁️ 雲端免費部署（Vercel — 手機 / PC 免安裝直接開網址）
+本專案已內建 Vercel Python Serverless 設定（`api/quote.py` 與 `vercel.json`）：
+1. 前往 [https://vercel.com](https://vercel.com) 使用 GitHub 帳號登入（個人版免費、免綁信用卡）。
+2. 點選 **Add New... → Project**，匯入 `tw-odd-lot-spread-monitor`。
+3. 保持預設設定，直接點 **Deploy**，約 1 分鐘即可取得專屬網址，手機可點「加入主畫面」當 App 使用。
+
+### Windows 一鍵啟動（本機版）
 1. 下載或 Clone 本專案。
 2. 直接雙擊 **`啟動盤中零股價差監控.bat`**。
 3. 瀏覽器會自動開啟 `http://127.0.0.1:8765`。
